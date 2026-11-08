@@ -43,7 +43,7 @@ h2{font-size:.75rem;font-weight:600;margin:0;color:var(--muted);letter-spacing:.
 .top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
 .status{display:flex;align-items:center;gap:6px;font-size:.78rem;color:var(--muted);margin-top:4px;font-variant-numeric:tabular-nums}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--faint)}
-.dot.live{background:var(--green)}
+.dot.live{background:var(--fg)}
 @media (prefers-reduced-motion:no-preference){.dot.live{animation:pulse 2s infinite}}
 @keyframes pulse{50%{opacity:.25}}
 .dot.bad{background:var(--danger)}
@@ -60,11 +60,11 @@ h2{font-size:.75rem;font-weight:600;margin:0;color:var(--muted);letter-spacing:.
 .today .place{font-size:1.2rem;font-weight:700;letter-spacing:-.02em}
 .today .verdict{grid-column:1/-1;font-size:.88rem;color:var(--muted);margin-top:8px}
 .pill{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:2px 9px;font-size:.74rem;font-weight:600;white-space:nowrap;border:1px solid var(--line);color:var(--muted)}
-.pill.ok,.pill.green{border-color:var(--green);color:var(--green)}
+.pill.ok{border-color:var(--line);color:var(--muted)}
 .pill.warn,.pill.yellow{border-color:var(--yellow);background:var(--yellow);color:var(--on-yellow)}
 .pill.crit,.pill.red{border-color:var(--red);background:var(--red);color:#fff}
 .pill.gray{border-color:var(--line);color:var(--muted)}
-.pill.solid-green{border-color:var(--green);background:var(--green);color:#fff}
+
 #map{height:320px;border-radius:4px;overflow:hidden;background:var(--soft)}
 .controls{display:flex;gap:16px;flex-wrap:wrap;justify-content:space-between}
 .seg{display:inline-flex;gap:4px}
@@ -79,9 +79,14 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--fg);outline-offset:
 .shindo .n{font-size:1.3rem;letter-spacing:-.03em}
 .shindo .t{font-size:.58rem;font-weight:500;margin-top:3px;opacity:.85}
 .lv-gray{background:var(--gray);color:var(--on-gray);border-color:transparent!important}
-.lv-green{background:var(--green);color:#fff;border-color:transparent!important}
-.lv-yellow{background:var(--yellow);color:var(--on-yellow);border-color:transparent!important}
-.lv-red{background:var(--red);color:#fff;border-color:transparent!important}
+/* yellow → red ramp for shindo 3 … 7 */
+.lv-30{background:#facc15;color:#0a0a0a;border-color:#facc15!important}
+.lv-40{background:#fb9a0e;color:#0a0a0a;border-color:#fb9a0e!important}
+.lv-45{background:#f76b15;color:#fff;border-color:#f76b15!important}
+.lv-50{background:#ea4a12;color:#fff;border-color:#ea4a12!important}
+.lv-55{background:#dc2626;color:#fff;border-color:#dc2626!important}
+.lv-60{background:#b91c1c;color:#fff;border-color:#b91c1c!important}
+.lv-70{background:#7f1d1d;color:#fff;border-color:#7f1d1d!important}
 .q .body{min-width:0;display:flex;flex-direction:column;gap:2px}
 .q .where{font-weight:700;font-size:1rem;display:flex;align-items:center;gap:6px}
 .q .where svg{flex:none}
@@ -187,7 +192,7 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--fg);outline-offset:
     <p style="font-size:.82rem;color:var(--muted);margin:0">일본은 규모(M)보다 각 지역의 흔들림인 <b style="color:var(--fg)">진도</b>로 위험을 판단합니다. 진도 3까지는 실내에서 흔들림을 느끼는 정도, 5약부터는 물건이 떨어지고 대중교통이 멈출 수 있으며, 6약 이상은 큰 피해 가능성이 있습니다. 흔들리면 머리를 보호하고 탁자 아래로, 해안에서 강한 흔들림이 있으면 경보를 기다리지 말고 높은 곳으로 이동하세요.</p>
   </div>
 
-  <div class="foot">자료 <a href="https://www.p2pquake.net/" target="_blank" rel="noopener">P2P地震情報</a> (기상청 발표 중계) · 지도 © OpenStreetMap, CARTO · 거리는 진앙에서 숙소까지 직선거리</div>
+  <div class="foot">자료 <a href="https://www.p2pquake.net/" target="_blank" rel="noopener">P2P地震情報</a> (기상청 발표 중계) · 지도 © OpenStreetMap · 거리는 진앙에서 숙소까지 직선거리</div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -297,9 +302,10 @@ if (window.L){
 }
 
 // ---------- render ----------
-function level(scale){ return scale>=45?"red":scale>=40?"yellow":scale>=30?"green":"gray"; }
-function shindoCls(scale){ return "lv-"+level(scale); }
-const LV_HEX={red:"#dc2626",yellow:"#eab308",green:"#16a34a",gray:"#8a8a8a"};
+const RAMP=[[70,"#7f1d1d"],[60,"#b91c1c"],[55,"#dc2626"],[50,"#ea4a12"],[45,"#f76b15"],[40,"#fb9a0e"],[30,"#facc15"]];
+function step(scale){ for(const [k] of RAMP) if(scale>=k) return k; return 0; }
+function shindoCls(scale){ const k=step(scale); return k?"lv-"+k:"lv-gray"; }
+function rampHex(scale){ const k=step(scale); return k?RAMP.find(r=>r[0]===k)[1]:"#8a8a8a"; }
 function shindoBox(scale){
   const s=SCALE[scale];
   if(!s) return `<div class="shindo lv-gray"><span class="n">?</span><span class="t">미상</span></div>`;
@@ -320,7 +326,7 @@ function render(){
     const mag=a.h.magnitude>0?`M${a.h.magnitude.toFixed(1)}`:"규모 미상";
     const dep=a.h.depth>0?`깊이 ${a.h.depth}km`:(a.h.depth===0?"깊이 매우 얕음":"");
     const tags=[];
-    if(a.routeMax>=10) tags.push(`<span class="pill ${level(a.routeMax)}">${toKo(a.routePref)} ${SCALE[a.routeMax]?.t||""} 관측</span>`);
+    if(a.routeMax>=10) tags.push(`<span class="pill ${shindoCls(a.routeMax)}">${toKo(a.routePref)} ${SCALE[a.routeMax]?.t||""} 관측</span>`);
     if(a.nearest) tags.push(`<span class="pill gray">${BAG_SVG}${esc(a.nearest.name)}까지 ${Math.round(a.nearest.d)}km</span>`);
     if(ts) tags.push(`<span class="pill ${ts[1]}">${ts[0]}</span>`);
     return `<article class="q ${a.near?"near":""} ${strong?"strong":""}" data-id="${esc(q.id)}">
@@ -340,7 +346,7 @@ function render(){
       if(!a.hasLoc) continue;
       const s=SCALE[a.e.maxScale];
       const dk=matchMedia("(prefers-color-scheme: dark)").matches;
-      const col=LV_HEX[level(a.e.maxScale)];
+      const col=rampHex(a.e.maxScale);
       const r=Math.max(4,(a.h.magnitude||3)*2.4);
       L.circleMarker([a.h.latitude,a.h.longitude],{radius:r,color:col,weight:1.5,fillColor:col,fillOpacity:.6})
         .addTo(layer).bindPopup(`<b>${esc(toKo(a.h.name))}</b><br>${fmtTime(a.time)} · ${s?s.t:"진도 미상"} · ${a.h.magnitude>0?"M"+a.h.magnitude.toFixed(1):""}`);
