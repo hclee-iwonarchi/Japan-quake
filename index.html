@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>여행길 지진 알리미</title>
+<meta name="description" content="일본 기상청 지진정보를 실시간으로 보여주는 형철·아내 여행용 페이지">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="지진 알리미">
+<meta name="theme-color" content="#f3f5f4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121615" media="(prefers-color-scheme: dark)">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+/* Layout: one narrow column (phone first) — status bar, "where we are today" card, map, then the quake list. */
+:root{
+  --bg:#f3f5f4; --surface:#ffffff; --fg:#17201d; --muted:#5b6964; --line:#dbe2df;
+  --accent:#0f6e62; --accent-soft:#e1efec;
+  --warn:#b45309; --warn-soft:#fdf0dc; --crit:#b91c1c; --crit-soft:#fde4e2; --ok:#15803d;
+  --sans:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  /* JMA shindo colours */
+  --s1:#9fb7c9; --s2:#4c9be0; --s3:#2a63c9; --s4:#e0b400; --s5l:#f08a00; --s5u:#e8590c; --s6l:#d62828; --s6u:#a4161a; --s7:#6a0f49;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#121615; --surface:#1b2120; --fg:#e7eeeb; --muted:#93a39d; --line:#2c3633;
+  --accent:#4cc4b2; --accent-soft:#183331;
+  --warn:#f5a524; --warn-soft:#3a2a10; --crit:#f87171; --crit-soft:#3d1717; --ok:#4ade80;
+  color-scheme:dark;
+}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 var(--sans);
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+.wrap{max-width:720px;margin:0 auto;padding-block:12px 40px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  display:flex;flex-direction:column;gap:14px}
+h1{font-size:1.35rem;margin:0;letter-spacing:-.01em;text-wrap:balance}
+h2{font-size:1rem;margin:0}
+.top{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;flex-wrap:wrap}
+.status{display:flex;align-items:center;gap:6px;font-size:.8rem;color:var(--muted)}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--muted)}
+.dot.live{background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 25%,transparent)}
+.dot.bad{background:var(--crit)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px}
+.notice{font-size:.82rem;color:var(--muted);background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 14px}
+.notice b{color:var(--fg)}
+.eew{display:none;background:var(--crit);color:#fff;border-radius:12px;padding:14px;font-weight:700}
+.eew.show{display:block}
+.eew small{display:block;font-weight:400;opacity:.92;margin-top:4px}
+.today{display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:center}
+.today .label{font-size:.75rem;color:var(--muted);letter-spacing:.04em}
+.today .place{font-size:1.15rem;font-weight:700}
+.today .verdict{grid-column:1/-1;font-size:.9rem;margin-top:4px}
+.pill{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:2px 10px;font-size:.78rem;font-weight:700;white-space:nowrap}
+.pill.ok{background:var(--accent-soft);color:var(--accent)}
+.pill.warn{background:var(--warn-soft);color:var(--warn)}
+.pill.crit{background:var(--crit-soft);color:var(--crit)}
+#map{height:300px;border-radius:12px;border:1px solid var(--line);overflow:hidden;background:var(--surface)}
+.controls{display:flex;gap:8px;flex-wrap:wrap}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--surface)}
+.seg button{font:inherit;font-size:.85rem;border:0;background:transparent;color:var(--fg);padding:7px 12px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--accent);color:#fff}
+.btn{font:inherit;font-size:.85rem;border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:10px;padding:7px 12px;cursor:pointer}
+button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.list{display:flex;flex-direction:column;gap:8px}
+.q{display:grid;grid-template-columns:56px 1fr;gap:12px;align-items:start;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px}
+.q.near{border-color:var(--warn);box-shadow:inset 4px 0 0 var(--warn)}
+.q.near.strong{border-color:var(--crit);box-shadow:inset 4px 0 0 var(--crit)}
+.shindo{width:56px;height:56px;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;font-weight:700;line-height:1}
+.shindo .n{font-size:1.45rem}
+.shindo .t{font-size:.62rem;margin-top:4px;opacity:.95;letter-spacing:.04em}
+.q .body{min-width:0;display:flex;flex-direction:column;gap:3px}
+.q .where{font-weight:700;font-size:1rem}
+.q .jp{font-size:.78rem;color:var(--muted)}
+.q .meta{font-size:.82rem;color:var(--muted);font-variant-numeric:tabular-nums;display:flex;flex-wrap:wrap;gap:2px 10px}
+.q .meta .mono{font-family:var(--mono)}
+.q .tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.empty{color:var(--muted);text-align:center;padding:24px 8px}
+.links{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px}
+.links a{display:block;text-decoration:none;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px}
+.links a b{display:block;color:var(--accent)}
+.links a span{font-size:.8rem;color:var(--muted)}
+.scale{display:flex;flex-wrap:wrap;gap:4px;font-size:.72rem}
+.scale span{border-radius:6px;padding:2px 6px;color:#fff;font-weight:700}
+.foot{font-size:.75rem;color:var(--muted)}
+.foot a{color:var(--muted)}
+.tel{font-family:var(--mono);font-weight:500;user-select:all}
+.leaflet-container{font:inherit}
+@media (prefers-reduced-motion:no-preference){.q.fresh{animation:flash 2s ease-out}}
+@keyframes flash{from{background:var(--warn-soft)}to{background:var(--surface)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <div>
+      <h1>여행길 지진 알리미</h1>
+      <div class="status"><span class="dot" id="dot"></span><span id="statusText">연결 중…</span></div>
+    </div>
+    <button class="btn" id="soundBtn" type="button">🔔 소리 알림 켜기</button>
+  </div>
+
+  <div class="eew" id="eew" role="alert"></div>
+
+  <div class="card today" id="today">
+    <div>
+      <div class="label">오늘 우리 위치</div>
+      <div class="place" id="todayPlace">-</div>
+    </div>
+    <span class="pill ok" id="todayPill">확인 중</span>
+    <div class="verdict" id="todayVerdict"></div>
+  </div>
+
+  <div id="map" aria-label="진원과 여행 경로 지도"></div>
+
+  <div class="controls">
+    <div class="seg" role="group" aria-label="표시 범위">
+      <button type="button" data-f="near" aria-pressed="true">여행 경로 주변</button>
+      <button type="button" data-f="all" aria-pressed="false">일본 전체</button>
+    </div>
+    <div class="seg" role="group" aria-label="최소 진도">
+      <button type="button" data-m="10" aria-pressed="true">진도 1+</button>
+      <button type="button" data-m="30" aria-pressed="false">3+</button>
+      <button type="button" data-m="45" aria-pressed="false">5약+</button>
+    </div>
+  </div>
+
+  <div class="list" id="list"><div class="empty">지진 정보를 불러오는 중…</div></div>
+
+  <div class="notice">
+    <b>공식 경보를 대신하지 않습니다.</b> 이 페이지는 일본 기상청(気象庁) 발표를 민간 서비스(P2P地震情報)가 중계한 자료를 보여 줍니다. 페이지를 열어 둔 동안만 갱신되고, 강한 흔들림 직전 경보(긴급지진속보)는 휴대폰 자체 경보와 아래 공식 앱이 훨씬 빠르고 정확합니다.
+  </div>
+
+  <h2>꼭 설치해 둘 공식 앱·사이트</h2>
+  <div class="links">
+    <a href="https://www.jnto.go.jp/safety-tips/kor/app.html" target="_blank" rel="noopener"><b>Safety tips (관광청)</b><span>한국어 지원. 긴급지진속보·쓰나미 경보 푸시 알림. 출국 전 설치 권장</span></a>
+    <a href="https://www3.nhk.or.jp/nhkworld/ko/" target="_blank" rel="noopener"><b>NHK WORLD-JAPAN 한국어</b><span>재난 시 한국어 뉴스·방송</span></a>
+    <a href="https://www.jma.go.jp/bosai/map.html#contents=earthquake_map" target="_blank" rel="noopener"><b>일본 기상청 지진정보</b><span>공식 원문 (일본어)</span></a>
+    <a href="https://www.jma.go.jp/bosai/map.html#contents=tsunami" target="_blank" rel="noopener"><b>기상청 쓰나미 경보</b><span>해안(히미 등) 머물 때 확인</span></a>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-bottom:6px">긴급 연락처</h2>
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:.9rem">
+      <span class="tel">110</span><span>경찰</span>
+      <span class="tel">119</span><span>구급·화재</span>
+      <span class="tel">050-3816-2787</span><span>Japan Visitor Hotline (24시간, 한국어 가능)</span>
+      <span class="tel">+82-2-3210-0404</span><span>외교부 영사콜센터 (24시간)</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-bottom:6px">진도(震度) 읽는 법</h2>
+    <div class="scale" id="scaleLegend"></div>
+    <p style="font-size:.82rem;color:var(--muted);margin:8px 0 0">일본은 규모(M)보다 각 지역의 흔들림인 <b>진도</b>로 위험을 판단합니다. 진도 3까지는 실내에서 흔들림을 느끼는 정도, 5약부터는 물건이 떨어지고 대중교통이 멈출 수 있으며, 6약 이상은 큰 피해 가능성이 있습니다. 흔들리면 머리를 보호하고 탁자 아래로, 해안에서 강한 흔들림이 있으면 경보를 기다리지 말고 높은 곳으로 이동하세요.</p>
+  </div>
+
+  <div class="foot">자료: <a href="https://www.p2pquake.net/" target="_blank" rel="noopener">P2P地震情報</a> (기상청 발표 중계) · 지도 © OpenStreetMap · 거리는 진앙에서 숙소까지 직선거리입니다.</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+"use strict";
+const API = "https://api.p2pquake.net/v2";
+const WS_URL = "wss://api.p2pquake.net/v2/ws";
+const NEAR_KM = 200;           // "near the route" radius from epicentre
+const ROUTE_PREFS = ["東京都","富山県","石川県","岐阜県","福井県","新潟県","長野県"];
+
+// Trip route (all dates JST, check-in day to check-out day)
+const PLACES = {
+  tokyo:   {name:"도쿄 (야나카·구라마에)", lat:35.712, lon:139.790},
+  takaoka: {name:"다카오카", lat:36.754, lon:137.026},
+  himi:    {name:"히미 (HOUSEHOLD)", lat:36.857, lon:136.987},
+  toyama:  {name:"도야마", lat:36.701, lon:137.213},
+  kanazawa:{name:"가나자와", lat:36.561, lon:136.656},
+  shirakawa:{name:"시라카와고", lat:36.258, lon:136.906},
+  komatsu: {name:"고마쓰 공항", lat:36.394, lon:136.407},
+};
+const STAYS = [ // [from, to(exclusive), placeKey]
+  ["2026-11-13","2026-11-16","tokyo"],
+  ["2026-11-16","2026-11-18","himi"],
+  ["2026-11-18","2026-11-23","kanazawa"],
+  ["2026-11-23","2026-11-24","komatsu"],
+];
+const SCALE = {
+  10:{n:"1",t:"진도 1",c:"var(--s1)"},20:{n:"2",t:"진도 2",c:"var(--s2)"},30:{n:"3",t:"진도 3",c:"var(--s3)"},
+  40:{n:"4",t:"진도 4",c:"var(--s4)"},45:{n:"5-",t:"5약",c:"var(--s5l)"},46:{n:"5-",t:"5약 이상",c:"var(--s5l)"},
+  50:{n:"5+",t:"5강",c:"var(--s5u)"},55:{n:"6-",t:"6약",c:"var(--s6l)"},60:{n:"6+",t:"6강",c:"var(--s6u)"},70:{n:"7",t:"진도 7",c:"var(--s7)"}
+};
+const TSUNAMI = {
+  None:["쓰나미 걱정 없음","ok"], NonEffective:["약간의 해수면 변동 가능 (피해 걱정 없음)","ok"],
+  Checking:["쓰나미 여부 조사 중","warn"], Unknown:["쓰나미 정보 없음","ok"],
+  Watch:["쓰나미 주의보","crit"], Warning:["쓰나미 경보","crit"]
+};
+const PREF_KO = {北海道:"홋카이도",青森県:"아오모리현",岩手県:"이와테현",宮城県:"미야기현",秋田県:"아키타현",山形県:"야마가타현",福島県:"후쿠시마현",茨城県:"이바라키현",栃木県:"도치기현",群馬県:"군마현",埼玉県:"사이타마현",千葉県:"지바현",東京都:"도쿄도",神奈川県:"가나가와현",新潟県:"니가타현",富山県:"도야마현",石川県:"이시카와현",福井県:"후쿠이현",山梨県:"야마나시현",長野県:"나가노현",岐阜県:"기후현",静岡県:"시즈오카현",愛知県:"아이치현",三重県:"미에현",滋賀県:"시가현",京都府:"교토부",大阪府:"오사카부",兵庫県:"효고현",奈良県:"나라현",和歌山県:"와카야마현",鳥取県:"돗토리현",島根県:"시마네현",岡山県:"오카야마현",広島県:"히로시마현",山口県:"야마구치현",徳島県:"도쿠시마현",香川県:"가가와현",愛媛県:"에히메현",高知県:"고치현",福岡県:"후쿠오카현",佐賀県:"사가현",長崎県:"나가사키현",熊本県:"구마모토현",大分県:"오이타현",宮崎県:"미야자키현",鹿児島県:"가고시마현",沖縄県:"오키나와현"};
+const REGION_KO = [["能登半島","노토반도"],["能登","노토"],["加賀","가가"],["伊豆半島","이즈반도"],["伊豆","이즈"],["駿河湾","스루가만"],["遠州灘","엔슈나다"],["相模湾","사가미만"],["東京湾","도쿄만"],["房総半島","보소반도"],["富山湾","도야마만"],["佐渡","사도"],["日向灘","휴가나다"],["紀伊水道","기이수도"],["三陸","산리쿠"],["十勝","도카치"],["釧路","구시로"],["根室","네무로"],["トカラ列島","도카라열도"],["奄美大島","아마미오시마"],["父島","지치지마"],["小笠原諸島","오가사와라제도"],["西方","서방"],["北西","북서"],["北東","북동"],["南西","남서"],["南東","남동"],["近海","근해"],["沖","앞바다"],["北部","북부"],["南部","남부"],["東部","동부"],["西部","서부"],["中部","중부"],["中越","주에쓰"],["上越","조에쓰"],["下越","가에쓰"],["地方","지방"],["多摩","다마"],["23区","23구"],["飛騨","히다"],["美濃","미노"],["嶺北","레이호쿠"],["嶺南","레이난"],["東方","동방"],["南方","남방"],["北方","북방"],["海域","해역"],["湾","만"]];
+
+function toKo(name){
+  if(!name) return "진원 정보 없음";
+  let s = name;
+  for (const [jp,ko] of Object.entries(PREF_KO)) s = s.split(jp).join(ko+" ");
+  for (const [jp,ko] of REGION_KO) s = s.split(jp).join(ko+" ");
+  return s.replace(/\s+/g," ").trim();
+}
+function km(a,b,c,d){const R=6371,r=Math.PI/180,x=(c-a)*r,y=(d-b)*r;const h=Math.sin(x/2)**2+Math.cos(a*r)*Math.cos(c*r)*Math.sin(y/2)**2;return 2*R*Math.asin(Math.sqrt(h));}
+function jstNow(){return new Date(Date.now()+9*3600e3).toISOString().slice(0,10);}
+function todayStay(){
+  const d=jstNow();
+  for(const [f,t,k] of STAYS){ if(d>=f && d<t) return {key:k,...PLACES[k],onTrip:true}; }
+  return null;
+}
+function parseTime(s){ // "2026/11/08 21:45:00" JST
+  if(!s) return null; const m=s.match(/(\d+)\/(\d+)\/(\d+) (\d+):(\d+)(?::(\d+))?/); if(!m) return null;
+  return new Date(Date.UTC(+m[1],m[2]-1,+m[3],m[4]-9,+m[5],+(m[6]||0)));
+}
+function fmtTime(d){
+  if(!d) return "-";
+  const j=new Date(d.getTime()+9*3600e3);
+  const p=n=>String(n).padStart(2,"0");
+  return `${j.getUTCMonth()+1}/${j.getUTCDate()} ${p(j.getUTCHours())}:${p(j.getUTCMinutes())}`;
+}
+function ago(d){ if(!d) return ""; const m=Math.round((Date.now()-d)/60000); if(m<1) return "방금"; if(m<60) return m+"분 전"; const h=Math.round(m/60); if(h<48) return h+"시간 전"; return Math.round(h/24)+"일 전"; }
+
+function analyse(q){
+  const e=q.earthquake||{}, h=e.hypocenter||{};
+  const hasLoc = h.latitude>-90 && h.longitude>-180;
+  let nearest=null;
+  if(hasLoc){
+    for(const [k,p] of Object.entries(PLACES)){
+      const d=km(h.latitude,h.longitude,p.lat,p.lon);
+      if(!nearest||d<nearest.d) nearest={k,d,name:p.name};
+    }
+  }
+  let routeMax=-1, routePref=null;
+  for(const pt of (q.points||[])){
+    if(ROUTE_PREFS.slice(0,4).includes(pt.pref) && pt.scale>routeMax){routeMax=pt.scale;routePref=pt.pref;}
+  }
+  const near = (nearest && nearest.d<=NEAR_KM) || routeMax>=10;
+  return {e,h,hasLoc,nearest,routeMax,routePref,near,time:parseTime(e.time)||parseTime(q.time)};
+}
+
+// ---------- state ----------
+let quakes = new Map();   // id -> raw
+let filter = "near", minScale = 10, soundOn=false, firstLoad=true;
+try{ filter = localStorage.getItem("qf")||filter; minScale = +(localStorage.getItem("qm")||minScale); }catch(_){}
+
+// ---------- map ----------
+let map=null, layer=null;
+if (window.L){
+  map = L.map("map",{zoomControl:true,attributionControl:true}).setView([36.4,138.3],6);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:12,attribution:"© OpenStreetMap"}).addTo(map);
+  const pts=["tokyo","takaoka","himi","toyama","kanazawa","shirakawa","komatsu"].map(k=>[PLACES[k].lat,PLACES[k].lon]);
+  L.polyline([pts[0],pts[1],pts[2],pts[3],pts[4],pts[6]],{color:"#0f6e62",weight:3,dashArray:"6 6"}).addTo(map);
+  for(const k of Object.keys(PLACES)){
+    L.circleMarker([PLACES[k].lat,PLACES[k].lon],{radius:6,color:"#fff",weight:2,fillColor:"#0f6e62",fillOpacity:1}).addTo(map).bindTooltip(PLACES[k].name);
+  }
+  layer=L.layerGroup().addTo(map);
+} else {
+  document.getElementById("map").innerHTML='<div class="empty">지도를 불러오지 못했습니다.</div>';
+}
+
+// ---------- render ----------
+function shindoBox(scale){
+  const s=SCALE[scale];
+  if(!s) return `<div class="shindo" style="background:var(--muted)"><span class="n">?</span><span class="t">진도 미상</span></div>`;
+  return `<div class="shindo" style="background:${s.c}"><span class="n">${s.n}</span><span class="t">${s.t}</span></div>`;
+}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+
+function render(){
+  const arr=[...quakes.values()].map(q=>({q,a:analyse(q)})).sort((x,y)=>(y.a.time||0)-(x.a.time||0));
+  const shown=arr.filter(({q,a})=>(filter==="all"||a.near) && (a.e.maxScale??-1)>=minScale);
+  const list=document.getElementById("list");
+  if(!arr.length){ list.innerHTML='<div class="empty">아직 받은 지진 정보가 없습니다.</div>'; }
+  else if(!shown.length){ list.innerHTML=`<div class="empty">최근 기록 중 조건에 맞는 지진이 없습니다.${filter==="near"?" (여행 경로 반경 "+NEAR_KM+"km 기준)":""}</div>`; }
+  else list.innerHTML = shown.slice(0,40).map(({q,a})=>{
+    const ts=TSUNAMI[a.e.domesticTsunami]||null;
+    const strong=(a.routeMax>=40)||(a.nearest&&a.nearest.d<100&&(a.e.maxScale||0)>=40);
+    const mag=a.h.magnitude>0?`M${a.h.magnitude.toFixed(1)}`:"규모 미상";
+    const dep=a.h.depth>0?`깊이 ${a.h.depth}km`:(a.h.depth===0?"깊이 매우 얕음":"");
+    const tags=[];
+    if(a.routeMax>=10) tags.push(`<span class="pill ${a.routeMax>=40?"crit":"warn"}">${toKo(a.routePref)} ${SCALE[a.routeMax]?.t||""} 관측</span>`);
+    if(a.nearest) tags.push(`<span class="pill ${a.nearest.d<=NEAR_KM?"warn":"ok"}">${esc(a.nearest.name)}까지 ${Math.round(a.nearest.d)}km</span>`);
+    if(ts) tags.push(`<span class="pill ${ts[1]}">${ts[0]}</span>`);
+    return `<article class="q ${a.near?"near":""} ${strong?"strong":""}" data-id="${esc(q.id)}">
+      ${shindoBox(a.e.maxScale)}
+      <div class="body">
+        <div class="where">${esc(toKo(a.h.name))}</div>
+        <div class="jp">${esc(a.h.name||"")}</div>
+        <div class="meta"><span class="mono">${fmtTime(a.time)}</span><span>${ago(a.time)}</span><span>${mag}</span><span>${dep}</span></div>
+        <div class="tags">${tags.join("")}</div>
+      </div></article>`;
+  }).join("");
+
+  // map markers (last 3 days, filtered list)
+  if(layer){
+    layer.clearLayers();
+    for(const {a} of shown.slice(0,40)){
+      if(!a.hasLoc) continue;
+      const s=SCALE[a.e.maxScale];
+      const col=s?getComputedStyle(document.documentElement).getPropertyValue(s.c.slice(4,-1)).trim():"#888";
+      const r=Math.max(5,(a.h.magnitude||3)*2.6);
+      L.circleMarker([a.h.latitude,a.h.longitude],{radius:r,color:"#fff",weight:1.5,fillColor:col||"#888",fillOpacity:.8})
+        .addTo(layer).bindPopup(`<b>${esc(toKo(a.h.name))}</b><br>${fmtTime(a.time)} · ${s?s.t:"진도 미상"} · ${a.h.magnitude>0?"M"+a.h.magnitude.toFixed(1):""}`);
+    }
+  }
+  renderToday(arr);
+}
+
+function renderToday(arr){
+  const st=todayStay();
+  const placeEl=document.getElementById("todayPlace"), pill=document.getElementById("todayPill"), v=document.getElementById("todayVerdict");
+  if(st){ placeEl.textContent=st.name; }
+  else { placeEl.textContent = jstNow()<"2026-11-13" ? "출발 전 (11/13 도쿄 도착)" : "여행 종료"; }
+  // anything in the last 24h near the route at shindo 3+?
+  const day=Date.now()-24*3600e3;
+  const recent=arr.filter(({a})=>a.time && a.time>day && a.near);
+  const worst=recent.reduce((m,{a})=>Math.max(m,a.routeMax,(a.nearest&&a.nearest.d<100)?(a.e.maxScale||0):-1),-1);
+  const tsunami=recent.some(({a})=>["Watch","Warning"].includes(a.e.domesticTsunami));
+  if(tsunami){ pill.className="pill crit"; pill.textContent="쓰나미 정보"; v.textContent="여행 경로 근처에 쓰나미 주의보·경보가 나왔습니다. 해안에서 떨어져 높은 곳으로 이동하고 NHK·Safety tips를 확인하세요."; }
+  else if(worst>=45){ pill.className="pill crit"; pill.textContent="강한 흔들림"; v.textContent="최근 24시간 안에 경로 근처에서 진도 5약 이상이 관측됐습니다. 여진에 대비하고 교통 운행 정보를 확인하세요."; }
+  else if(worst>=30){ pill.className="pill warn"; pill.textContent="주의"; v.textContent="최근 24시간 안에 경로 근처에서 진도 3~4가 관측됐습니다. 일상 생활에는 대개 지장이 없습니다."; }
+  else { pill.className="pill ok"; pill.textContent="평온"; v.textContent=recent.length?"최근 24시간 경로 근처에서는 진도 2 이하의 작은 지진만 있었습니다.":"최근 24시간 동안 여행 경로 근처에 눈에 띄는 지진이 없습니다."; }
+}
+
+// ---------- status ----------
+let lastOk=null;
+function setStatus(state,text){
+  const dot=document.getElementById("dot"); dot.className="dot "+(state==="live"?"live":state==="bad"?"bad":"");
+  document.getElementById("statusText").textContent=text;
+}
+function refreshStatusText(){
+  if(wsLive) setStatus("live",`실시간 연결됨 · 마지막 확인 ${lastOk?fmtTime(lastOk):"-"}`);
+  else if(lastOk) setStatus("", `1분마다 자동 새로고침 · 마지막 확인 ${fmtTime(lastOk)}`);
+}
+
+// ---------- data ----------
+async function loadHistory(){
+  try{
+    const r=await fetch(`${API}/jma/quake?limit=100&order=-1`,{cache:"no-store"});
+    if(!r.ok) throw new Error(r.status);
+    const data=await r.json();
+    for(const q of data) addQuake(q,!firstLoad);
+    lastOk=new Date(); firstLoad=false; render(); refreshStatusText();
+  }catch(err){
+    try{ // fallback endpoint
+      const r=await fetch(`${API}/history?codes=551&limit=100`,{cache:"no-store"});
+      const data=await r.json(); for(const q of data) addQuake(q,!firstLoad);
+      lastOk=new Date(); firstLoad=false; render(); refreshStatusText();
+    }catch(e2){ if(!wsLive) setStatus("bad","자료를 불러오지 못했습니다. 인터넷 연결을 확인해 주세요."); }
+  }
+}
+function addQuake(q,isNew){
+  if(!q||q.code!==551) return false;
+  if(q.issue && q.issue.type==="Foreign") return false;
+  const id=q.id||q._id||(q.earthquake&&q.earthquake.time+(q.earthquake.hypocenter||{}).name);
+  // keep the most detailed report for the same event time+place
+  const key=(q.earthquake?.time||"")+"|"+(q.earthquake?.hypocenter?.name||"");
+  const prev=[...quakes.entries()].find(([,v])=>((v.earthquake?.time||"")+"|"+(v.earthquake?.hypocenter?.name||""))===key);
+  // ScalePrompt (진도속보) has no hypocentre; DetailScale replaces it
+  if(prev){ if((q.points||[]).length>=(prev[1].points||[]).length) quakes.delete(prev[0]); else return false; }
+  // also drop a ScalePrompt for same time if this report has a hypocentre
+  q.id=id; quakes.set(id,q);
+  if(isNew) onNewQuake(q);
+  return true;
+}
+function onNewQuake(q){
+  const a=analyse(q);
+  if(a.near && (a.e.maxScale||0)>=30){ beep(a.e.maxScale>=45?3:1); if(navigator.vibrate) navigator.vibrate([200,100,200]); }
+}
+
+// 긴급지진속보 (code 556 = warning level EEW)
+function onEEW(m){
+  if(m.cancelled){ hideEEW(); return; }
+  const areas=(m.areas||[]).map(x=>x.pref).filter((v,i,s)=>v&&s.indexOf(v)===i);
+  const routeHit=areas.some(p=>ROUTE_PREFS.includes(p));
+  const box=document.getElementById("eew");
+  box.innerHTML=`⚠️ 긴급지진속보(경보): 강한 흔들림 주의${routeHit?" — 여행 경로 지역 포함":""}<small>대상: ${esc(areas.map(toKo).join(", ")||"정보 없음")} · 머리를 보호하고 낙하물에서 떨어지세요.</small>`;
+  box.classList.add("show");
+  beep(5); if(navigator.vibrate) navigator.vibrate([400,150,400,150,400]);
+  clearTimeout(onEEW.t); onEEW.t=setTimeout(hideEEW,10*60e3);
+}
+function hideEEW(){document.getElementById("eew").classList.remove("show");}
+
+let ws=null, wsLive=false, wsRetry=2000;
+function connectWS(){
+  try{ ws=new WebSocket(WS_URL); }catch(_){ return; }
+  ws.onopen=()=>{wsLive=true; wsRetry=2000; lastOk=new Date(); refreshStatusText();};
+  ws.onmessage=(ev)=>{
+    let m; try{m=JSON.parse(ev.data);}catch(_){return;}
+    lastOk=new Date();
+    if(m.code===551){ if(addQuake(m,true)) render(); else refreshStatusText(); }
+    else if(m.code===556){ onEEW(m); }
+    refreshStatusText();
+  };
+  ws.onclose=()=>{wsLive=false; refreshStatusText(); setTimeout(connectWS,wsRetry); wsRetry=Math.min(wsRetry*2,60000);};
+  ws.onerror=()=>{try{ws.close();}catch(_){}};
+}
+
+// ---------- sound ----------
+let actx=null;
+function beep(n){
+  if(!soundOn||!actx) return;
+  for(let i=0;i<n;i++){
+    const o=actx.createOscillator(), g=actx.createGain(), t=actx.currentTime+i*0.45;
+    o.frequency.value=880; o.connect(g); g.connect(actx.destination);
+    g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.4,t+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t+0.35);
+    o.start(t); o.stop(t+0.4);
+  }
+}
+document.getElementById("soundBtn").addEventListener("click",()=>{
+  soundOn=!soundOn;
+  if(soundOn){ try{ actx=actx||new (window.AudioContext||window.webkitAudioContext)(); actx.resume(); }catch(_){} beep(1); }
+  document.getElementById("soundBtn").textContent=soundOn?"🔔 소리 알림 켜짐":"🔔 소리 알림 켜기";
+});
+
+// ---------- controls ----------
+function syncButtons(){
+  document.querySelectorAll("[data-f]").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.f===filter)));
+  document.querySelectorAll("[data-m]").forEach(b=>b.setAttribute("aria-pressed",String(+b.dataset.m===minScale)));
+}
+document.querySelectorAll("[data-f]").forEach(b=>b.addEventListener("click",()=>{filter=b.dataset.f;try{localStorage.setItem("qf",filter)}catch(_){};syncButtons();render();}));
+document.querySelectorAll("[data-m]").forEach(b=>b.addEventListener("click",()=>{minScale=+b.dataset.m;try{localStorage.setItem("qm",minScale)}catch(_){};syncButtons();render();}));
+document.getElementById("scaleLegend").innerHTML=[10,20,30,40,45,50,55,60,70].map(k=>`<span style="background:${SCALE[k].c}">${SCALE[k].t}</span>`).join("");
+
+syncButtons();
+renderToday([]);
+loadHistory();
+connectWS();
+setInterval(loadHistory,60000);
+setInterval(()=>{refreshStatusText(); if(quakes.size) render();},30000);
+document.addEventListener("visibilitychange",()=>{ if(!document.hidden) loadHistory(); });
+</script>
+</body>
+</html>
