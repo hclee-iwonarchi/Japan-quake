@@ -100,6 +100,7 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--fg);outline-offset:
 .leaflet-container{font:inherit;background:var(--soft)}
 .bag-pin{color:var(--bg)}
 .bag-pin div{width:26px;height:26px;border-radius:50%;background:var(--fg);display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px var(--bg)}
+.me-pin div{width:16px;height:16px;border-radius:50%;background:var(--danger);box-shadow:0 0 0 3px var(--bg),0 0 0 9px color-mix(in srgb,var(--danger) 25%,transparent)}
 .bag-pin.today div{width:34px;height:34px;box-shadow:0 0 0 3px var(--bg),0 0 0 4px var(--fg)}
 @media (prefers-reduced-motion:no-preference){.q.fresh{animation:flash 2s ease-out}}
 @keyframes flash{from{background:var(--soft)}to{background:transparent}}
@@ -128,6 +129,10 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--fg);outline-offset:
     <span class="pill" id="todayPill" style="grid-row:1/3;grid-column:3">확인 중</span>
     <div class="place" id="todayPlace">-</div>
     <div class="verdict" id="todayVerdict"></div>
+    <div style="grid-column:1/-1;margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button class="btn" id="gpsBtn" type="button" aria-pressed="false"><svg width="14" height="14" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="currentColor"/><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 1v3M12 20v3M1 12h3M20 12h3" stroke="currentColor" stroke-width="2"/></svg><span>GPS로 내 위치 사용</span></button>
+      <span id="gpsNote" style="font-size:.75rem;color:var(--faint)">위치는 이 휴대폰 안에서만 쓰이고 어디에도 전송되지 않습니다.</span>
+    </div>
   </div>
 
   <div id="map" aria-label="진원과 여행 경로 지도"></div>
@@ -339,7 +344,11 @@ function render(){
 function renderToday(arr){
   const st=todayStay();
   const placeEl=document.getElementById("todayPlace"), pill=document.getElementById("todayPill"), v=document.getElementById("todayVerdict");
-  if(st){ placeEl.textContent=st.name; }
+  if(gps){
+    let best=null; for(const [k,p] of Object.entries(PLACES)){ if(k==="me")continue; const d=km(gps.lat,gps.lon,p.lat,p.lon); if(!best||d<best.d) best={d,name:p.name}; }
+    placeEl.textContent = best && best.d<30 ? `${best.name} 근처 (GPS)` : "현재 위치 (GPS)";
+  }
+  else if(st){ placeEl.textContent=st.name; }
   else { placeEl.textContent = jstNow()<"2026-11-13" ? "출발 전 (11/13 도쿄 도착)" : "여행 종료"; }
   // anything in the last 24h near the route at shindo 3+?
   const day=Date.now()-24*3600e3;
@@ -443,6 +452,43 @@ document.getElementById("soundBtn").addEventListener("click",()=>{
   document.getElementById("soundBtn").setAttribute("aria-pressed",String(soundOn));
   document.getElementById("soundBtn").querySelector("span").textContent=soundOn?"소리 켜짐":"소리 알림";
 });
+
+// ---------- GPS ----------
+let gps=null, meMarker=null, watchId=null;
+function setGps(lat,lon){
+  gps={lat,lon}; PLACES.me={name:"내 현재 위치",lat,lon};
+  if(map){
+    const icon=L.divIcon({className:"me-pin",html:"<div></div>",iconSize:[16,16],iconAnchor:[8,8]});
+    if(meMarker) meMarker.setLatLng([lat,lon]); else meMarker=L.marker([lat,lon],{icon,zIndexOffset:2000}).addTo(map).bindTooltip("내 현재 위치");
+  }
+  render();
+}
+function startGps(fromClick){
+  const note=document.getElementById("gpsNote"), btn=document.getElementById("gpsBtn");
+  if(!navigator.geolocation){ note.textContent="이 브라우저는 위치 기능을 지원하지 않습니다."; return; }
+  note.textContent="위치 확인 중…";
+  let first=true;
+  watchId=navigator.geolocation.watchPosition(pos=>{
+    setGps(pos.coords.latitude,pos.coords.longitude);
+    btn.setAttribute("aria-pressed","true"); btn.querySelector("span").textContent="GPS 사용 중";
+    note.textContent=`정확도 약 ${Math.round(pos.coords.accuracy)}m · 위치는 이 휴대폰 안에서만 쓰입니다.`;
+    if(first&&map&&fromClick){ map.setView([pos.coords.latitude,pos.coords.longitude],7); } first=false;
+    try{localStorage.setItem("gps","1")}catch(_){}
+  },err=>{
+    note.textContent = err.code===1 ? "위치 권한이 꺼져 있습니다. 설정 > Safari(또는 Chrome) > 위치에서 허용해 주세요. 여행 일정 기준으로 표시합니다." : "위치를 확인하지 못했습니다. 여행 일정 기준으로 표시합니다.";
+    try{localStorage.removeItem("gps")}catch(_){}
+  },{enableHighAccuracy:false,maximumAge:300000,timeout:20000});
+}
+function stopGps(){
+  if(watchId!==null) navigator.geolocation.clearWatch(watchId); watchId=null;
+  gps=null; delete PLACES.me; if(meMarker){meMarker.remove();meMarker=null;}
+  const btn=document.getElementById("gpsBtn"); btn.setAttribute("aria-pressed","false"); btn.querySelector("span").textContent="GPS로 내 위치 사용";
+  document.getElementById("gpsNote").textContent="여행 일정 기준으로 표시합니다.";
+  try{localStorage.removeItem("gps")}catch(_){}
+  render();
+}
+document.getElementById("gpsBtn").addEventListener("click",()=>{ if(watchId!==null||gps) stopGps(); else startGps(true); });
+try{ if(localStorage.getItem("gps")==="1") startGps(false); }catch(_){}
 
 // ---------- controls ----------
 function syncButtons(){
